@@ -39,8 +39,10 @@ class DecisionPolicy:
         # placeholder signal for the demo loop: mean-reversion-ish on spread
         return "buy" if snap.spread_bps < self.policy.max_spread_bps / 2 else "sell"
 
-    def decide(self, agent_id: str, snap: PerceptionSnapshot,
-               amount: int, action: str | None = None) -> Decision:
+    def decide(self, agent_id: int, snap: PerceptionSnapshot,
+               amount: int, action: str | None = None,
+               reason: str | None = None,
+               model_id: str = "strategy-v1") -> Decision:
         p = self.policy
 
         if snap.liquidity_usd < p.min_liquidity_usd:
@@ -54,6 +56,9 @@ class DecisionPolicy:
         self._nonce += 1
         return Decision(
             agent_id=agent_id,
+            reason=reason or f"{action} {snap.asset} spread={snap.spread_bps:.1f}bps "
+                             f"liq={snap.liquidity_usd:.0f}",
+            model_id=model_id,
             chain=snap.chain,
             action=action,
             venue=snap.venue,

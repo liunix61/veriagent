@@ -18,17 +18,18 @@ from engine.agent import VeriAgent, State, OrderViolation
 
 def _decision(nonce: int = 1) -> Decision:
     return Decision(
-        agent_id="agent-1", chain="arbitrum-sepolia", action="buy",
+        agent_id=1, chain="arbitrum-sepolia", action="buy",
         venue="uniswap-v3", asset="WETH", amount=10**16,
         max_slippage_bps=50, risk_score=1200,
         context_hash="0x" + "ab" * 32, nonce=nonce,
         expires_at=2_000_000_000,
+        reason="test reason", model_id="test-model",
     )
 
 
 def _agent(tmp_path, policy=None, fail_rate=0.0):
     return VeriAgent(
-        agent_id="agent-1",
+        agent_id=1,
         source=MockMarketDataSource(seed=7),
         policy_engine=DecisionPolicy(policy),
         recorder=LocalRecorder(str(tmp_path / "audit.jsonl")),
@@ -63,21 +64,21 @@ def test_policy_rejects_thin_liquidity():
     pol = DecisionPolicy(RiskPolicy(min_liquidity_usd=10_000_000))
     snap = MockMarketDataSource().snapshot("arb", "uni", "WETH")
     with pytest.raises(DecisionReject, match="INSUFFICIENT_LIQUIDITY"):
-        pol.decide("a", snap, 100)
+        pol.decide(1, snap, 100)
 
 
 def test_policy_rejects_wide_spread():
     pol = DecisionPolicy(RiskPolicy(max_spread_bps=0.001))
     snap = MockMarketDataSource().snapshot("arb", "uni", "WETH")
     with pytest.raises(DecisionReject, match="SPREAD_TOO_WIDE"):
-        pol.decide("a", snap, 100)
+        pol.decide(1, snap, 100)
 
 
 def test_policy_nonce_monotonic():
     pol = DecisionPolicy()
     snap = MockMarketDataSource().snapshot("arb", "uni", "WETH")
-    d1 = pol.decide("a", snap, 100)
-    d2 = pol.decide("a", snap, 100)
+    d1 = pol.decide(1, snap, 100)
+    d2 = pol.decide(1, snap, 100)
     assert d2.nonce == d1.nonce + 1
 
 

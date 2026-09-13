@@ -6,22 +6,28 @@
       </span>
     </h2>
     <p style="color: var(--dim); font-size: 12px; margin-top: 0">
-      每笔交易先有凭证后有成交 — recordedAt ≤ boundAt 是硬性可验证顺序，不是口头承诺。
+      每笔交易先有凭证后有成交 — record 区块 ≤ bind 区块是硬性可验证顺序，不是口头承诺。
+      合约只存四哈希（action/reason/dataSource/model），全文在链下 bundle，重算哈希即可对账。
     </p>
     <table>
       <thead>
         <tr>
-          <th>credential</th><th>decision</th><th>amount</th>
-          <th>recorded → bound</th><th>order</th>
+          <th>id</th><th>agent</th><th>four hashes</th>
+          <th>record → bind</th><th>order</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows" :key="row.credentialId">
-          <td class="hash">{{ row.credentialId }}</td>
-          <td>{{ row.action }} {{ row.asset }} <span style="color: var(--dim)">@{{ row.venue }}</span></td>
-          <td>{{ row.amount }}</td>
+        <tr v-for="row in rows" :key="row.decisionId">
+          <td>#{{ row.decisionId }}</td>
+          <td>{{ row.agentId }}</td>
           <td style="font-size: 11px">
-            <span class="hash">{{ row.recordedAt }}</span>
+            <span class="hash">act {{ row.actionHash }}</span><br />
+            <span class="hash">rea {{ row.reasonHash }}</span><br />
+            <span class="hash">src {{ row.dataSourceHash }}</span><br />
+            <span class="hash">mod {{ row.modelHash }}</span>
+          </td>
+          <td style="font-size: 11px">
+            <span class="hash">blk {{ row.recordBlock }}</span>
             <template v-if="row.boundTx"> → <span class="hash">{{ row.boundTx }}</span></template>
             <template v-else> → <span style="color: var(--dim)">pending</span></template>
           </td>
@@ -46,19 +52,24 @@ const { getClient, cfg, connected } = useChain();
 const mode = ref<"chain" | "demo">("demo");
 
 interface Row {
-  credentialId: string; action: string; asset: string; venue: string;
-  amount: string; recordedAt: string; boundTx: string | null; orderOk: boolean;
+  decisionId: string; agentId: string;
+  actionHash: string; reasonHash: string; dataSourceHash: string; modelHash: string;
+  recordBlock: string; boundTx: string | null; orderOk: boolean;
 }
 
 const rows = ref<Row[]>([]);
 
+const h = (s: unknown) => String(s).slice(0, 10) + "…";
+
 const DEMO_ROWS: Row[] = [
-  { credentialId: "0xc870…f34", action: "buy", asset: "WETH", venue: "uniswap-v3",
-    amount: "0.01", recordedAt: "blk 1201", boundTx: "0x9ea3…7cb7", orderOk: true },
-  { credentialId: "0xfbd9…a40", action: "buy", asset: "WETH", venue: "uniswap-v3",
-    amount: "0.01", recordedAt: "blk 1203", boundTx: "0xda3f…f14a", orderOk: true },
-  { credentialId: "0x4be4…b196", action: "sell", asset: "ARB", venue: "uniswap-v3",
-    amount: "12.5", recordedAt: "blk 1207", boundTx: "0x5596…b881", orderOk: true },
+  { decisionId: "1", agentId: "7",
+    actionHash: h("0xdd53723a2398aff8"), reasonHash: h("0x3c4dc0f96c0af442"),
+    dataSourceHash: h("0xe47fff08fcc1b5db"), modelHash: h("0x36e92fb341dbfc84"),
+    recordBlock: "1201", boundTx: "0x9ea3…7cb7", orderOk: true },
+  { decisionId: "2", agentId: "7",
+    actionHash: h("0x11aa22bb33cc44dd"), reasonHash: h("0x55ee66ff77889900"),
+    dataSourceHash: h("0xabcdef1234567890"), modelHash: h("0x36e92fb341dbfc84"),
+    recordBlock: "1203", boundTx: "0xda3f…f14a", orderOk: true },
 ];
 
 onMounted(async () => {
@@ -69,25 +80,28 @@ onMounted(async () => {
   }
   try {
     const c = getClient();
-    const logs = await c.getContractEvents({
+    const recorded = await c.getContractEvents({
       address: recorder as `0x${string}`,
       abi: recorderAbi, eventName: "DecisionRecorded",
       fromBlock: 0n, toBlock: "latest",
     });
-    const bindings = await c.getContractEvents({
+    const bound = await c.getContractEvents({
       address: recorder as `0x${string}`,
-      abi: recorderAbi, eventName: "TradeBound",
+      abi: recorderAbi, eventName: "DecisionBound",
       fromBlock: 0n, toBlock: "latest",
     });
-    const bound = new Map(bindings.map((b: any) => [b.args.credentialId, b]));
-    rows.value = logs.map((l: any) => {
-      const b: any = bound.get(l.args.credentialId);
+    const boundById = new Map(bound.map((b: any) => [String(b.args.decisionId), b]));
+    rows.value = recorded.map((l: any) => {
+      const b: any = boundById.get(String(l.args.decisionId));
       return {
-        credentialId: String(l.args.credentialId).slice(0, 10) + "…",
-        action: l.args.action, asset: l.args.asset, venue: l.args.venue,
-        amount: String(l.args.amount),
-        recordedAt: `blk ${l.blockNumber}`,
-        boundTx: b ? String(b.args.txHash).slice(0, 10) + "…" : null,
+        decisionId: String(l.args.decisionId),
+        agentId: String(l.args.agentId),
+        actionHash: h(l.args.actionHash),
+        reasonHash: h(l.args.reasonHash),
+        dataSourceHash: h(l.args.dataSourceHash),
+        modelHash: h(l.args.modelHash),
+        recordBlock: String(l.blockNumber),
+        boundTx: b ? h(b.args.txHash) : null,
         // order validity: binding must be at/after the recording block
         orderOk: b ? b.blockNumber >= l.blockNumber : false,
       };

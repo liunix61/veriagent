@@ -46,7 +46,7 @@ class LoopReport:
 
 @dataclass
 class VeriAgent:
-    agent_id: str
+    agent_id: int
     source: MarketDataSource
     policy_engine: DecisionPolicy
     recorder: LocalRecorder
@@ -83,7 +83,7 @@ class VeriAgent:
 
     def _bind_tx(self, cred: Credential, result: TradeResult) -> None:
         """Bind execution tx back to the credential (mirrors bindTx)."""
-        cred.recorded_tx = result.tx_hash
+        cred.bound_tx = result.tx_hash
         binding_path = self.recorder.path + ".bindings.jsonl"
         with open(binding_path, "a") as f:
             f.write(json.dumps({
@@ -123,7 +123,7 @@ class VeriAgent:
 
             # 5. verify binding
             report.tx_bound = (
-                self._cred.recorded_tx == result.tx_hash
+                self._cred.bound_tx == result.tx_hash
                 and result.tx_hash is not None
             )
             self._state = State.VERIFIED if report.tx_bound else State.EXECUTED

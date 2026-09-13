@@ -1,4 +1,9 @@
-"""Core data models. Pure data, no I/O — hashable and deterministic."""
+"""Core data models. Pure data, no I/O — hashable and deterministic.
+
+Hash mapping is anchored to the REAL DecisionRecorder.sol contract:
+    record(agentId, actionHash, reasonHash, dataSourceHash, modelHash)
+Full decision JSON lives off-chain; the chain stores only the four hashes.
+"""
 
 from __future__ import annotations
 
@@ -27,53 +32,95 @@ except ImportError:  # fallback: sha256, flagged so judges/users know
     HASH_ALGO = "sha256"
 
 
+def _h32(text: str) -> str:
+    """0x-prefixed 32-byte hash of a UTF-8 string."""
+    return "0x" + _hash(text.encode()).hex()
+
+
+def _h32_json(obj: dict) -> str:
+    return "0x" + _hash(_canonical(obj).encode()).hex()
+
+
 @dataclass(frozen=True)
 class Decision:
     """A trading decision, produced by the strategy from market perception.
 
-    Mirrors DecisionRecorder.sol's DecisionPayload struct field-for-field so
-    an off-chain decision hashes to the same commitment as the on-chain one.
+    On-chain, only the four commitment hashes are stored (see abi_encode.py):
+      actionHash      = keccak(canonical JSON of the action payload)
+      reasonHash      = keccak(reason text)
+      dataSourceHash  = keccak(context sources + x402 proofs)
+      modelHash       = keccak(model/prompt version)
     """
-    agent_id: str
+    agent_id: int                # uint256 agent id in AgentIdentityRegistry
     chain: str
-    action: str            # "buy" | "sell"
-    venue: str             # venue adapter id, e.g. "uniswap-v3"
-    asset: str             # asset symbol
-    amount: int            # amount in base units (wei-style)
-    max_slippage_bps: int  # allowed slippage, basis points
-    risk_score: int        # 0-10000, mirrors contract scale
-    context_hash: str      # hash of the market snapshot that justified this
-    nonce: int             # per-agent replay guard
-    expires_at: int        # unix ts, mirrors contract deadline semantics
+    action: str                  # "buy" | "sell"
+    venue: str
+    asset: str
+    amount: int                  # base units
+    max_slippage_bps: int
+    risk_score: int              # 0-10000
+    context_hash: str            # hash of the market snapshot (data source)
+    nonce: int
+    expires_at: int              # unix ts
+    reason: str = ""             # LLM reason summary (→ reasonHash)
+    model_id: str = "unspecified"  # model/prompt version (→ modelHash)
+
+    # ── the four on-chain hashes ──────────────────
+
+    @property
+    def action_payload(self) -> dict:
+        """Canonical action payload — hashed into actionHash on-chain."""
+        return {
+            "action": self.action,
+            "amount": self.amount,
+            "asset": self.asset,
+            "chain": self.chain,
+            "expires_at": self.expires_at,
+            "max_slippage_bps": self.max_slippage_bps,
+            "nonce": self.nonce,
+            "risk_score": self.risk_score,
+            "venue": self.venue,
+        }
+
+    @property
+    def action_hash(self) -> str:
+        return _h32_json(self.action_payload)
+
+    @property
+    def reason_hash(self) -> str:
+        if not self.reason:
+            raise ValueError("reason is required for an on-chain credential")
+        return _h32(self.reason)
+
+    @property
+    def data_source_hash(self) -> str:
+        """Hashes the evidence bundle: market snapshot + x402 proofs."""
+        return _h32_json({"context_hash": self.context_hash, "proofs": []})
+
+    @property
+    def model_hash(self) -> str:
+        return _h32(self.model_id)
+
+    @property
+    def record_args(self) -> dict:
+        """The exact five arguments submitted to DecisionRecorder.record()."""
+        return {
+            "agent_id": self.agent_id,
+            "action_hash": self.action_hash,
+            "reason_hash": self.reason_hash,
+            "data_source_hash": self.data_source_hash,
+            "model_hash": self.model_hash,
+        }
+
+    # ── local audit hash (JSONL hash chain, off-chain integrity) ──
 
     def to_payload_dict(self) -> dict:
         return asdict(self)
 
     @property
     def decision_hash(self) -> str:
-        """Commitment hash — the thing that gets recorded on-chain."""
+        """Local audit commitment over the full decision (off-chain chain)."""
         return "0x" + _hash(_canonical(self.to_payload_dict()).encode()).hex()
-
-    @property
-    def onchain_hash(self) -> str:
-        """EVM abi.encode parity hash — byte-identical to
-        DecisionRecorder.sol's decisionHash (proven by HashParity.t.sol /
-        test_abi_parity.py). This is the value submitted on-chain."""
-        from .abi_encode import decision_payload_hash
-        return decision_payload_hash(
-            agent_id=self.agent_id if self.agent_id.startswith("0x")
-            else "0x" + "00" * 20,  # non-address agent ids get zero address
-            chain=self.chain,
-            action=self.action,
-            venue=self.venue,
-            asset=self.asset,
-            amount=self.amount,
-            max_slippage_bps=self.max_slippage_bps,
-            risk_score=self.risk_score,
-            context_hash=self.context_hash,
-            nonce=self.nonce,
-            expires_at=self.expires_at,
-        )
 
 
 @dataclass
@@ -83,7 +130,9 @@ class Credential:
     decision: Decision
     decision_hash: str
     algo: str = HASH_ALGO
-    recorded_tx: str | None = None      # set once anchored on-chain
+    decision_id: int | None = None    # on-chain decisionId (post-record)
+    recorded_tx: str | None = None    # tx that anchored record() on-chain
+    bound_tx: str | None = None       # execution tx hash (post-bindTx)
     block_number: int | None = None
     created_at: float = field(default_factory=time.time)
 
@@ -92,7 +141,9 @@ class Credential:
             "credential_id": self.credential_id,
             "decision_hash": self.decision_hash,
             "algo": self.algo,
+            "decision_id": self.decision_id,
             "recorded_tx": self.recorded_tx,
+            "bound_tx": self.bound_tx,
             "block_number": self.block_number,
             "created_at": self.created_at,
             "decision": asdict(self.decision),

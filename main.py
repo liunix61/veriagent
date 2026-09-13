@@ -35,7 +35,7 @@ def main() -> int:
     args = ap.parse_args()
 
     agent = VeriAgent(
-        agent_id="demo-agent-1",
+        agent_id=1,
         source=MockMarketDataSource(seed=args.seed),
         policy_engine=DecisionPolicy(RiskPolicy()),
         recorder=LocalRecorder(args.audit),
