@@ -54,6 +54,27 @@ class Decision:
         """Commitment hash — the thing that gets recorded on-chain."""
         return "0x" + _hash(_canonical(self.to_payload_dict()).encode()).hex()
 
+    @property
+    def onchain_hash(self) -> str:
+        """EVM abi.encode parity hash — byte-identical to
+        DecisionRecorder.sol's decisionHash (proven by HashParity.t.sol /
+        test_abi_parity.py). This is the value submitted on-chain."""
+        from .abi_encode import decision_payload_hash
+        return decision_payload_hash(
+            agent_id=self.agent_id if self.agent_id.startswith("0x")
+            else "0x" + "00" * 20,  # non-address agent ids get zero address
+            chain=self.chain,
+            action=self.action,
+            venue=self.venue,
+            asset=self.asset,
+            amount=self.amount,
+            max_slippage_bps=self.max_slippage_bps,
+            risk_score=self.risk_score,
+            context_hash=self.context_hash,
+            nonce=self.nonce,
+            expires_at=self.expires_at,
+        )
+
 
 @dataclass
 class Credential:
