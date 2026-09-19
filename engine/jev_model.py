@@ -27,6 +27,7 @@ typed action + calibrated confidence, no free text.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from dataclasses import dataclass
 
@@ -109,6 +110,120 @@ class JevModel:
 
     def _parse_decision(self, raw: dict) -> JevDecision:
         return JevDecision(action=str(raw["action"]), confidence=float(raw["confidence"]))
+
+
+class NanoJevModel:
+    """NanoJev backend — open-source Jev replica by TianyuCodings (forked at
+    liunix61/NanoJev), reviewed against the official TypeSafe contract
+    (docs/types/TYPESAFE_CONTRACT.md audit 2026-09-17).
+
+    NanoJev: Qwen3-0.6B backbone + decision heads, 95%/90% vs Jev's
+    100%/95% on the 40-map navigation benchmark, complete probability
+    distributions out, zero output-token decoding. Self-hosted via
+    `scripts/serve_decisions.py` -> `POST /api/evaluate` (persistent model
+    endpoint; demo limits: 32 states / 96 questions / 256 candidate paths).
+
+    Request contract (per serve_decisions.py source):
+        {"states": [{"state": <context>, "questions": {qid: {
+            "type": "choice", "criteria": [c1, c2, ...]}}}]}
+
+    State-content key inside each state object follows NanoJev's
+    validate_request schema; calibrate against the live server on first
+    connect. The decision contract is identical to JevModel — same
+    JevDecision, same VeriAgent credential pipeline, model_id distinguishes
+    the open-source lineage on-chain.
+    """
+
+    MODEL_ID = "nanojev-0.6b"
+    # documented local-serving limits
+    MAX_STATES = 32
+    MAX_QUESTIONS = 96
+    MAX_PATHS = 256
+
+    def __init__(self, endpoint: str | None = None, timeout_sec: float = 5.0):
+        self.endpoint = endpoint or os.environ.get(
+            "NANOJEV_ENDPOINT", "http://127.0.0.1:8765")
+        self.timeout_sec = timeout_sec
+
+    @property
+    def ready(self) -> bool:
+        return bool(self.endpoint)
+
+    def build_payload(self, snap: PerceptionSnapshot) -> dict:
+        """Market snapshot -> NanoJev batch request (choice primitive)."""
+        session = getattr(snap, "session", MarketSession.OPEN)
+        state_ctx = {
+            "asset": snap.asset,
+            "underlying": getattr(snap, "underlying", "") or snap.asset,
+            "mid_price": round(snap.mid_price, 8),
+            "spread_bps": round(snap.spread_bps, 4),
+            "liquidity_usd": round(snap.liquidity_usd, 2),
+            "venue": snap.venue,
+            "chain": snap.chain,
+            "session": session.value,
+        }
+        return {
+            "states": [{
+                "state": str(state_ctx),
+                "questions": {
+                    "trading_decision": {
+                        "type": "choice",
+                        # candidate names+descriptions are semantic inputs
+                        # (TypeSafe Choice contract): order preserved
+                        "criteria": [
+                            "buy: increase position at the touch",
+                            "sell: decrease position at the touch",
+                            "hold: no order this block",
+                        ],
+                    }
+                },
+            }]
+        }
+
+    def parse_response(self, raw: dict) -> JevDecision:
+        """NanoJev distribution -> JevDecision (argmax + its probability).
+
+        Response: complete probability distribution over the supplied
+        candidates per question. Confidence = probability of the selected
+        candidate (the model's own calibrated estimate for that choice).
+        """
+        questions = raw.get("questions") or raw.get("answers") or {}
+        q = questions.get("trading_decision") if isinstance(questions, dict) else None
+        if q is None and isinstance(questions, dict) and len(questions) == 1:
+            q = next(iter(questions.values()))
+        if q is None:
+            raise JevTransportError(f"unexpected NanoJev response shape: {raw!r}")
+        dist = q.get("distribution") or q.get("probabilities") or {}
+        if not dist:
+            raise JevTransportError(f"NanoJev returned no distribution: {q!r}")
+        # keys may be candidate names ("buy") or "buy: ..." descriptions
+        norm = {}
+        for k, v in dist.items():
+            key = str(k).split(":")[0].strip().lower()
+            norm[key] = float(v)
+        best = max(norm, key=norm.get)
+        return JevDecision(action=best, confidence=round(norm[best], 4))
+
+    def decide(self, snap: PerceptionSnapshot) -> JevDecision:
+        """Ask the self-hosted NanoJev server for a typed decision."""
+        import urllib.request
+        payload = self.build_payload(snap)
+        req = urllib.request.Request(
+            self.endpoint.rstrip("/") + "/api/evaluate",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_sec) as resp:
+                raw = json.loads(resp.read().decode())
+        except Exception as e:
+            raise JevTransportError(
+                f"NanoJev serving unreachable at {self.endpoint} — start it: "
+                f"python scripts/serve_decisions.py --checkpoint-dir "
+                f"checkpoints/NanoJev --port 8765 ({e})"
+            )
+        return self.parse_response(raw)
 
 
 class MockJevModel:
