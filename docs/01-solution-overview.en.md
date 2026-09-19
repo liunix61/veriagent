@@ -57,6 +57,38 @@ How each core condition maps to VeriAgent:
 bStocks on Robinhood Chain (an Arbitrum Orbit chain) are the flagship product of this
 track — VeriAgent's engine and contracts are designed against the TSV compliance surface.
 
+## 3.2 AI Decision-Model Audit Layer: Jev (TypeSafe System One) Integration
+
+TypeSafe AI released Jev on 2026-09-16 — the first System One Model: it generates
+**no text, only typed decisions with calibrated confidence** ($42/B tokens, 193x
+faster / 444x cheaper than LLMs, structurally hallucination-free; from a ChatGPT
+co-inventor). Within 48 hours, jarrodwatts/jev-trader (1.1k stars) and forks wired
+Jev decisions **directly into on-chain order books** — one buy/sell every Monad
+block, zero audit trail.
+
+That is exactly the trust gap VeriAgent closes: "Jev said buy — on what evidence,
+verifiable by whom, after the fact?" Integration architecture as the audit layer:
+
+```
+market snapshot -> JevModel.decide() -> JevDecision {action, confidence}
+   -> DecisionPolicy (inverted confidence -> risk_score; session gates unchanged)
+   -> Decision four-hash credential (model_id="jev-systemone", confidence in reason)
+   -> DecisionRecorder on-chain + JSONL hash chain
+```
+
+- Jev decisions run the **same credential pipeline** as any model — modelHash
+  distinguishes the decision source on-chain
+- **Compliance > model**: no matter how confident Jev is, HALTED sessions hard-reject
+  with MARKET_HALTED (the SEC concurrent-halt condition fires before the model)
+- Calibrated confidence is preserved in the decision record — auditors see the
+  model's own uncertainty
+- Transport is never guessed: Jev is in early access (waitlist); the endpoint must
+  come from official docs (docs.typesafe.ai); MockJevModel demos the full flow
+  against the documented output contract
+
+Tests: 13 Jev integration tests (decision contract / confidence mapping / auditable
+credentials / HALT-gate precedence / model_hash lineage) — all green.
+
 ## 4. Product Shape
 
 ```
