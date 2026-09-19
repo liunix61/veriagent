@@ -353,4 +353,39 @@ contract VeriAgentVaultTest is Test {
             assetWhitelist: wl, maxPositionPctBps: capBps, dailyLossLimitBps: lossBps,
             tradeCooldown: cooldown, maxTradesPerDay: maxPerDay}));
     }
+
+    // ── tokenized-equity dividends (bStocks, SEC No-Synthetics passthrough) ──
+
+    function test_notifyDividend_byOwner() public {
+        vault.notifyDividend(address(nvda), 25e18);
+        assertEq(vault.dividendsReceived(address(nvda)), 25e18);
+        // second event accumulates
+        vault.notifyDividend(address(nvda), 10e18);
+        assertEq(vault.dividendsReceived(address(nvda)), 35e18);
+    }
+
+    function test_notifyDividend_emitsEvent() public {
+        vm.expectEmit(true, false, false, true);
+        emit VeriAgentVault.DividendReceived(address(nvda), 25e18, uint64(block.timestamp));
+        vault.notifyDividend(address(nvda), 25e18);
+    }
+
+    function test_notifyDividend_bySessionKey() public {
+        // the bound agent's session key observed the distribution
+        vm.prank(key);
+        vault.notifyDividend(address(nvda), 42e18);
+        assertEq(vault.dividendsReceived(address(nvda)), 42e18);
+    }
+
+    function test_notifyDividend_revertsStranger() public {
+        vm.prank(stranger);
+        vm.expectRevert(VeriAgentVault.NotSessionKey.selector);
+        vault.notifyDividend(address(nvda), 25e18);
+    }
+
+    function test_notifyDividend_revertsNotWhitelisted() public {
+        MockERC20 doge = new MockERC20("Doge");
+        vm.expectRevert(abi.encodeWithSelector(VeriAgentVault.PolicyViolation.selector, keccak256("NOT_WHITELISTED")));
+        vault.notifyDividend(address(doge), 25e18);
+    }
 }

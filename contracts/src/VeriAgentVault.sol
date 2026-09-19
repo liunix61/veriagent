@@ -83,6 +83,12 @@ contract VeriAgentVault {
     event PolicyQueued(uint64 effectiveAt);
     event PolicyActivated();
     event PausedSet(bool paused);
+    /// @notice Tokenized-equity dividend distribution acknowledged on-chain.
+    ///         SEC "No Synthetics" (Innovation Exemption 2026-09-17): tokenized
+    ///         shares must pass through the same dividend rights as the
+    ///         underlying share — this event is the on-chain record of that
+    ///         passthrough, mirroring the engine's dividend_ack credential.
+    event DividendReceived(address indexed asset, uint256 amount, uint64 timestamp);
 
     error NotOwner();
     error NotSessionKey();
@@ -191,6 +197,30 @@ contract VeriAgentVault {
     function withdraw(address asset, uint256 amount) external onlyOwner {
         IERC20(asset).transfer(msg.sender, amount);
         emit Withdrawn(asset, amount);
+    }
+
+    // ──────────────────────────────────────────────
+    // Tokenized-equity dividends (bStocks on Robinhood Chain)
+    // ──────────────────────────────────────────────
+
+    /// @notice Cumulative dividends received per asset (tokenized equities).
+    mapping(address => uint256) public dividendsReceived;
+
+    /// @notice Record a dividend/distribution event for a whitelisted
+    ///         tokenized-equity asset. SEC "No Synthetics" principle
+    ///         (Innovation Exemption 2026-09-17): holders of stock tokens
+    ///         must retain dividend rights identical to the traditional
+    ///         share — this function is the on-chain record of that
+    ///         passthrough. Callable by the bound agent session key (the
+    ///         oracle/agent that observed the distribution) or the owner.
+    function notifyDividend(address asset, uint256 amount) external {
+        if (msg.sender != owner) {
+            (uint256 keyAgentId, bool active) = registry.agentOfSessionKey(msg.sender);
+            if (keyAgentId == 0 || !active || keyAgentId != agentId) revert NotSessionKey();
+        }
+        if (!_isWhitelisted(asset)) revert PolicyViolation(R_NOT_WHITELISTED);
+        dividendsReceived[asset] += amount;
+        emit DividendReceived(asset, amount, uint64(block.timestamp));
     }
 
     // ──────────────────────────────────────────────

@@ -39,6 +39,24 @@ Mapping to the 4 judging criteria:
 3. Innovation → "decision credential" primitive doesn't exist elsewhere
 4. Real problem → trust deficit in agent asset management
 
+## 3.1 RWA Compliance Alignment: SEC Innovation Exemption (2026-09-17)
+
+On 2026-09-17 the SEC issued a five-year Innovation Exemption creating the **TSV
+(Tokenized Securities Venue)** category: real stocks tokenized 1:1 may trade on
+permissioned AMM/liquidity pools without national-securities-exchange registration.
+How each core condition maps to VeriAgent:
+
+| SEC TSV condition | VeriAgent implementation |
+|---|---|
+| **No Synthetics**: tokens must carry dividend+voting rights identical to traditional shares | `TokenizedEquity.onchain_rights=True` flag; dividend passthrough audited twice — engine `run_dividend` -> `dividend_ack` credential + on-chain `notifyDividend`/`DividendReceived` event |
+| **Concurrent halt**: tokenized trading stops when the primary market halts | `MarketSession.HALTED` hard gate -> `DecisionReject("MARKET_HALTED")` — no credential generated, executor unreachable |
+| **After-hours liquidity management**: 24/7 venues see thin liquidity | `MarketSession.CLOSED` -> +3000bps risk premium + widened spread tolerance; decision reason records `session=CLOSED` on-chain |
+| **Issuer rights + transparency**: trade data published within 10 minutes | Four commitment hashes per decision (action/reason/dataSource/model) + JSONL hash chain; `context_hash` embeds the session state |
+| **Trading caps** (Tier 1: 75 symbols / 0.25% ADV) | Vault policy engine: `maxPositionPctBps` + `maxTradesPerDay` + `dailyLossLimitBps` |
+
+bStocks on Robinhood Chain (an Arbitrum Orbit chain) are the flagship product of this
+track — VeriAgent's engine and contracts are designed against the TSV compliance surface.
+
 ## 4. Product Shape
 
 ```

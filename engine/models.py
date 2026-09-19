@@ -158,3 +158,23 @@ class TradeResult:
     filled_amount: int = 0
     gas_used: int = 0
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class DividendEvent:
+    """Dividend/distribution event on a tokenized equity (bStocks).
+
+    SEC "No Synthetics" principle (Innovation Exemption 2026-09-17):
+    tokenized shares must pass through the same dividend rights as the
+    traditional share. The agent acknowledges each event as an auditable
+    credential (action="dividend_ack") — dividends are events to prove,
+    not trades to execute.
+    """
+    asset: str                   # token symbol, e.g. "bAAPL"
+    token_address: str           # ERC-20 token on Robinhood Chain
+    underlying: str              # underlying ticker, e.g. "AAPL"
+    per_share: float             # dividend per share (USD)
+    total_amount: float          # vault's total dividend (USD)
+    ex_date: str = ""            # "YYYY-MM-DD"
+    pay_date: str = ""
+    source_tx: str | None = None  # on-chain distribution tx (if any)

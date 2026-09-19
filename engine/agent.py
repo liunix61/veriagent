@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .models import Decision, Credential, TradeResult
+from .models import Decision, Credential, TradeResult, DividendEvent
 from .perception import MarketDataSource, PerceptionSnapshot
 from .strategy import DecisionPolicy, DecisionReject
 from .recorder import LocalRecorder
@@ -32,6 +32,19 @@ class State(str, Enum):
 
 class OrderViolation(Exception):
     """A trade was attempted before its credential existed."""
+
+
+@dataclass
+class DividendReceipt:
+    """Audit proof that the agent acknowledged a dividend event.
+
+    Not a trade: recorded as a credential (action="dividend_ack") so the
+    rights-passthrough required by SEC tokenized-equity rules is itself
+    auditable on-chain and in the JSONL hash chain.
+    """
+    event: DividendEvent
+    credential: Credential
+    recorded: bool = True
 
 
 @dataclass
@@ -137,6 +150,38 @@ class VeriAgent:
             self._cred = None
             self._decision = None
         return report
+
+    # ── tokenized-equity dividend acknowledgment ──
+
+    def run_dividend(self, event: DividendEvent,
+                     model_id: str = "dividend-ack-v1") -> DividendReceipt:
+        """Acknowledge a dividend event as an auditable credential.
+
+        Walks the same record path as trades (four on-chain hashes) but
+        NEVER reaches the executor — dividends are proven, not traded.
+        The reason text carries the event details; the credential hash
+        proves the agent knew about the distribution when it says it did.
+        """
+        import time as _time
+        decision = Decision(
+            agent_id=self.agent_id,
+            reason=f"dividend_ack {event.underlying} dps={event.per_share:.4f} "
+                   f"total={event.total_amount:.2f} ex={event.ex_date} "
+                   f"pay={event.pay_date}",
+            model_id=model_id,
+            chain="robinhood-chain",
+            action="dividend_ack",
+            venue="bstocks",
+            asset=event.asset,
+            amount=int(round(event.total_amount * 100)),  # cents → int units
+            max_slippage_bps=0,
+            risk_score=0,
+            context_hash="0x" + event.token_address.lower().replace("0x", "").ljust(64, "0")[:64],
+            nonce=0,
+            expires_at=int(_time.time()) + 86_400,  # receipts valid 24h
+        )
+        cred = self.recorder.record(decision)
+        return DividendReceipt(event=event, credential=cred, recorded=True)
 
     def audit_trail_valid(self) -> bool:
         return self.recorder.verify_chain()
