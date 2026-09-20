@@ -41,10 +41,10 @@ reconciliation requires zero trust in the engine operator.
 ## Quickstart
 
 ```bash
-# contract tests (77)
+# contract tests (84)
 cd contracts && forge test
 
-# engine tests (16) + one-command demo
+# engine tests (59) + one-command demo
 cd .. && python3 -m pytest tests/ -q
 python3 main.py --loops 5        # verifiable audit trail output
 
@@ -61,9 +61,24 @@ cd frontend && npm install && npm run dev
 - **Engine state machine**: any execution before `RECORDED` raises `OrderViolation`
 - **Hash-chained audit log**: one altered byte fails verification (tested)
 
+## RWA compliance + AI decision-model audit layer
+
+- **SEC TSV alignment** (Innovation Exemption 2026-09-17): `MarketSession.HALTED`
+  hard-rejects trades (concurrent-halt condition); `CLOSED` trades carry a
+  +3000bps risk premium recorded on-chain; dividends audited twice — engine
+  `dividend_ack` credential + on-chain `notifyDividend` event (No Synthetics)
+- **Dual-track AI decision-model auditing**: Jev (TypeSafe System One) and
+  NanoJev (open 0.6B replica, liunix61/NanoJev) run the same four-hash
+  credential pipeline — `model_id`/`modelHash` distinguish the model lineage
+  on-chain; compliance gates fire BEFORE the model (HALTED rejects regardless
+  of model confidence)
+- **bStocks console**: frontend BStocksPanel shows per-holding session pills,
+  rights passthrough flags, and the dividend audit trail (Robinhood Chain
+  narrative made visible)
+
 ## Tests & real bugs caught
 
-103 tests (77 forge + 16 pytest + 10 misc). Real contract bugs found and fixed
+143 tests (84 forge + 59 pytest). Real contract bugs found and fixed
 during development: fake timelock (direct overwrite), missing day-snapshot
 sentinel, first-trade cooldown kill, position-cap denominator error, EIP-712
 signature malleability exposure.

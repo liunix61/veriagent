@@ -35,10 +35,10 @@ engine/abi_encode.py  ⇄  abi.encode()        Nuxt4 Console (Audit Explorer)
 ## 快速开始
 
 ```bash
-# 合约测试 (77 tests)
+# 合约测试 (84 tests)
 cd contracts && forge test
 
-# 引擎测试 (16 tests) + 一键 demo
+# 引擎测试 (59 tests) + 一键 demo
 cd .. && python3 -m pytest tests/ -q
 python3 main.py --loops 5        # 输出可验证审计轨迹
 
@@ -54,9 +54,15 @@ cd frontend && npm install && npm run dev
 - **引擎侧状态机**：`RECORDED` 之前任何执行调用抛 `OrderViolation`
 - **审计哈希链**：JSONL 链式哈希，篡改一字节即验证失败（有测试证明）
 
+## RWA 合规层 + AI 决策模型审计层
+
+- **SEC TSV 对齐**（Innovation Exemption 2026-09-17）：`MarketSession.HALTED` → 硬拒交易（停牌联动）；`CLOSED` → +3000bps 风险溢价上链存证；股息经 `dividend_ack` 凭证 + `notifyDividend` 链上事件双重审计（No Synthetics 条件）
+- **AI 决策模型双轨审计**：Jev（TypeSafe System One）与 NanoJev（开源 0.6B 复刻，liunix61/NanoJev）走同一条四哈希凭证流水线——`model_id`/`modelHash` 在链上区分决策模型血统；合规门控优先于模型（HALTED 时段无论模型置信度多高一律拒单）
+- **bStocks 控制台**：前端 BStocksPanel 展示持仓时段状态/权利标记/股息审计流（Robinhood Chain 叙事直接可见）
+
 ## 测试与真 bug
 
-103 个测试（77 forge + 16 pytest + 10 其它）。开发中抓出并修复的真合约 bug：
+143 个测试（84 forge + 59 pytest）。开发中抓出并修复的真合约 bug：
 timelock 假生效（直接覆写）、日快照 sentinel 缺失、首笔冷却误杀、
 position cap 分母错误（漏计本次买入）、EIP-712 签名可锻性风险。
 
